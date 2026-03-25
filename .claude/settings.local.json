@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sw_vers)",
+      "Bash(git -C /Users/kido/git/companies/way2do.it/production/window_lock/ log --oneline -10)",
+      "Bash(chmod +x /Users/kido/git/companies/way2do.it/production/window_lock/Scripts/install.sh /Users/kido/git/companies/way2do.it/production/window_lock/Scripts/uninstall.sh)",
+      "Bash(swift build:*)",
+      "Bash(swift run:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(f''''{w[\"\"ownerName\"\"]:20s} [{w[\"\"windowIndex\"\"]}] title=\"\"{w[\"\"windowTitle\"\"][:50]}\"\" display={w[\"\"displayName\"\"]}''''\\) for w in d[''''windows'''']]\")",
+      "Bash(chmod +x /Users/kido/git/companies/way2do.it/production/window_lock/Scripts/uninstall.sh)",
+      "Bash(security find-identity:*)",
+      "Bash(chmod +x /Users/kido/git/companies/way2do.it/production/window_lock/Scripts/dev-build.sh)",
+      "Bash(./Scripts/dev-build.sh)",
+      "Bash(codesign -dvv .build/arm64-apple-macosx/debug/WindowLock)",
+      "Bash(codesign -dvvv .build/arm64-apple-macosx/debug/WindowLock)",
+      "Bash(.build/arm64-apple-macosx/debug/WindowLock --capture-only)",
+      "Bash(/usr/libexec/PlistBuddy -c \"Print CFBundleIdentifier\" .build/WindowLock.app/Contents/Info.plist)",
+      "Bash(codesign -dvv .build/WindowLock.app)",
+      "Bash(chmod +x /Users/kido/git/companies/way2do.it/production/window_lock/Installer/scripts/preinstall /Users/kido/git/companies/way2do.it/production/window_lock/Installer/scripts/postinstall)",
+      "Bash(chmod +x /Users/kido/git/companies/way2do.it/production/window_lock/Scripts/build-installer.sh)",
+      "Bash(./Scripts/build-installer.sh)",
+      "Bash(chmod -R u+w /Users/kido/git/companies/way2do.it/production/window_lock/.build/WindowLock.app)",
+      "Bash(chmod -R u+w .build/WindowLock.app)"
+    ]
+  }
+}

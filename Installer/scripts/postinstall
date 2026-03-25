@@ -1,0 +1,51 @@
+#!/bin/bash
+# Determine the real logged-in user (not root, since pkg scripts run as root)
+CONSOLE_USER=$(stat -f '%Su' /dev/console)
+CONSOLE_UID=$(id -u "$CONSOLE_USER")
+CONSOLE_HOME=$(dscl . -read /Users/"$CONSOLE_USER" NFSHomeDirectory | awk '{print $2}')
+
+APP_PATH="/Applications/WindowLock.app"
+PLIST_NAME="com.way2do.windowlock.plist"
+LAUNCH_AGENTS_DIR="$CONSOLE_HOME/Library/LaunchAgents"
+
+# Create LaunchAgents directory if missing
+mkdir -p "$LAUNCH_AGENTS_DIR"
+chown "$CONSOLE_USER" "$LAUNCH_AGENTS_DIR"
+
+# Write the LaunchAgent plist
+cat > "$LAUNCH_AGENTS_DIR/$PLIST_NAME" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.way2do.windowlock</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Applications/WindowLock.app/Contents/MacOS/WindowLock</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/tmp/windowlock-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/windowlock-stderr.log</string>
+</dict>
+</plist>
+PLIST
+
+# Set correct ownership
+chown "$CONSOLE_USER" "$LAUNCH_AGENTS_DIR/$PLIST_NAME"
+
+# Load the LaunchAgent as the GUI user
+launchctl bootstrap "gui/$CONSOLE_UID" "$LAUNCH_AGENTS_DIR/$PLIST_NAME" 2>/dev/null || true
+
+exit 0

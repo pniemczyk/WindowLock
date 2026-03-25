@@ -1,0 +1,13 @@
+#!/bin/bash
+# Stop existing WindowLock if running
+PLIST_NAME="com.way2do.windowlock"
+CONSOLE_USER=$(stat -f '%Su' /dev/console)
+CONSOLE_UID=$(id -u "$CONSOLE_USER")
+
+# Unload the LaunchAgent if loaded
+launchctl bootout "gui/$CONSOLE_UID/$PLIST_NAME" 2>/dev/null || true
+
+# Kill any running WindowLock process
+killall WindowLock 2>/dev/null || true
+
+exit 0

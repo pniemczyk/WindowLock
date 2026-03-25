@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {
+    font-family: -apple-system, Helvetica Neue, sans-serif;
+    font-size: 13px;
+    padding: 10px;
+    color: black;
+    background: white;
+  }
+  h2 { font-size: 16px; margin-top: 18px; margin-bottom: 6px; }
+  h3 { font-size: 14px; margin-top: 14px; margin-bottom: 4px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  .path {
+    font-family: Menlo, monospace;
+    font-size: 11px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    border: 1px solid #ccc;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: white; background: transparent; }
+    .path { border-color: #555; }
+  }
+</style>
+</head>
+<body>
+  <h2>How It Works</h2>
+  <p>WindowLock sits in your menu bar and quietly keeps track of every window — which app, which monitor, what position and size. One click to save a layout. One click to restore it. No configuration files. No learning curve.</p>
+  <ul>
+    <li><strong>Captures</strong> window positions every 30 seconds and immediately before sleep</li>
+    <li><strong>Restores</strong> windows after wake, display changes, or app launches</li>
+    <li><strong>Matches</strong> displays by resolution — survives the display ID shuffle macOS does after every sleep</li>
+    <li><strong>Saves named layouts</strong> — switch between "Work", "Coding", "Presentation" in one click</li>
+    <li>Runs silently in the menu bar, no Dock icon, no interruptions</li>
+  </ul>
+
+  <h2>What Gets Installed</h2>
+  <ul>
+    <li><span class="path">/Applications/WindowLock.app</span></li>
+    <li><span class="path">~/Library/LaunchAgents/com.way2do.windowlock.plist</span> (auto-start on login)</li>
+  </ul>
+
+  <h2>Data Storage</h2>
+  <ul>
+    <li>Window state and saved layouts: <span class="path">~/Library/Application Support/WindowLock/</span></li>
+    <li>Logs: <span class="path">/tmp/windowlock-stderr.log</span></li>
+  </ul>
+
+  <h3>Permissions</h3>
+  <p><strong>Accessibility</strong> permission is required to move and resize windows. You'll be guided through this after installation.</p>
+  <p><strong>Screen Recording</strong> is optional and improves window title detection.</p>
+</body>
+</html>
