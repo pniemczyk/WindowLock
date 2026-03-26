@@ -32,12 +32,14 @@ struct WindowInfo: Codable, Sendable {
   let ownerName: String
   let windowTitle: String
   let pid: Int32
+  let windowNumber: UInt32      // CGWindowID for space operations
   let windowIndex: Int
   let frame: CodableRect
   let relativeFrame: CodableRect
   let displayIndex: Int
   let displayName: String
-  let spaceNumber: Int
+  let spaceIndex: Int           // 1-based index of the Space this window is on (0 = unknown)
+  let spaceNumber: Int          // kept for backward compatibility with saved JSON
   let isOnScreen: Bool
   let windowLayer: Int
   let memoryUsage: Int

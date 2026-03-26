@@ -12,8 +12,10 @@ enum WindowTracker {
   static func captureCurrentState() -> WindowSnapshot {
     let displays = DisplayManager.currentDisplays()
 
+    // Use .optionAll to get windows from ALL spaces, not just the active one.
+    // .optionOnScreenOnly only returns windows on the current space.
     guard let windowList = CGWindowListCopyWindowInfo(
-      [.optionOnScreenOnly, .excludeDesktopElements],
+      [.optionAll, .excludeDesktopElements],
       kCGNullWindowID
     ) as? [[String: Any]] else {
       Log.warn("Failed to get window list")
@@ -26,18 +28,27 @@ enum WindowTracker {
     var windows: [WindowInfo] = []
     // Track per-app window index for matching when titles are empty
     var appWindowIndex: [String: Int] = [:]
+    // Track seen CGWindowIDs to avoid duplicates
+    var seenWindowIDs: Set<UInt32> = []
+
+    // Collect all candidate CGWindowIDs first to batch-query space indices
+    var collectedWindowIDs: [UInt32] = []
+    for entry in windowList {
+      guard let layer = entry[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+      guard let wid = entry[kCGWindowNumber as String] as? UInt32, wid > 0 else { continue }
+      collectedWindowIDs.append(wid)
+    }
+
+    // Batch-fetch real space indices via CGS private API
+    let spaceIndices = SpaceManager.spaceIndicesForWindows(windowIDs: collectedWindowIDs)
+
+    // Build space-to-display UUID mapping for accurate display assignment
+    let spaceDisplayMap = SpaceManager.spaceToDisplayMap()
 
     for entry in windowList {
       guard let layer = entry[kCGWindowLayer as String] as? Int, layer == 0 else {
         continue
       }
-
-      guard let boundsDict = entry[kCGWindowBounds as String] as? [String: Any],
-            let rect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
-        continue
-      }
-
-      guard rect.width > 0 && rect.height > 0 else { continue }
 
       let ownerName = entry[kCGWindowOwnerName as String] as? String ?? ""
       guard !ignoredOwners.contains(ownerName) else { continue }
@@ -52,6 +63,29 @@ enum WindowTracker {
       }
 
       guard !bundleID.isEmpty else { continue }
+
+      let windowNumber = entry[kCGWindowNumber as String] as? UInt32 ?? 0
+
+      // Skip duplicates (optionAll can return the same window multiple times)
+      guard windowNumber > 0, !seenWindowIDs.contains(windowNumber) else { continue }
+      seenWindowIDs.insert(windowNumber)
+
+      guard let boundsDict = entry[kCGWindowBounds as String] as? [String: Any],
+            let rect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
+        continue
+      }
+
+      // Allow zero-size for minimized windows but skip truly empty ones
+      guard rect.width > 0 && rect.height > 0 else { continue }
+
+      let isOnScreen = entry[kCGWindowIsOnscreen as String] as? Bool ?? false
+
+      // Skip off-screen windows that have no space (likely system artifacts)
+      let legacySpaceNumber = entry["kCGWindowWorkspace" as String] as? Int ?? 0
+      let spaceIndex = spaceIndices[windowNumber] ?? legacySpaceNumber
+      if !isOnScreen && spaceIndex == 0 {
+        continue
+      }
 
       // Get window title: try CGWindowList first, fall back to AX API
       var windowTitle = entry[kCGWindowName as String] as? String ?? ""
@@ -72,13 +106,26 @@ enum WindowTracker {
       let currentIndex = appWindowIndex[bundleID] ?? 0
       appWindowIndex[bundleID] = currentIndex + 1
 
-      let isOnScreen = entry[kCGWindowIsOnscreen as String] as? Bool ?? true
       let windowLayer = entry[kCGWindowLayer as String] as? Int ?? 0
       let memoryUsage = entry[kCGWindowMemoryUsage as String] as? Int ?? 0
-      let spaceNumber = entry["kCGWindowWorkspace" as String] as? Int ?? 0
 
-      let displayIndex = DisplayManager.displayIndex(for: rect.origin, in: displays)
-      let display = displays.indices.contains(displayIndex) ? displays[displayIndex] : displays.first!
+      // Determine display: for off-screen windows (other spaces), use the space-to-display
+      // mapping from CGS API. For on-screen windows, use position-based detection.
+      let displayIndex: Int
+      let display: DisplayInfo
+      if isOnScreen {
+        displayIndex = DisplayManager.displayIndex(for: rect.origin, in: displays)
+        display = displays.indices.contains(displayIndex) ? displays[displayIndex] : displays.first!
+      } else if let displayUUID = spaceDisplayMap[spaceIndex],
+                let idx = DisplayManager.displayIndexByUUID(displayUUID, in: displays) {
+        displayIndex = idx
+        display = displays[idx]
+      } else {
+        // Fallback: use position-based heuristic even for off-screen
+        displayIndex = DisplayManager.displayIndex(for: rect.origin, in: displays)
+        display = displays.indices.contains(displayIndex) ? displays[displayIndex] : displays.first!
+      }
+
       let relFrame = DisplayManager.relativeFrame(rect, in: display)
 
       windows.append(WindowInfo(
@@ -86,19 +133,22 @@ enum WindowTracker {
         ownerName: ownerName,
         windowTitle: windowTitle,
         pid: pid,
+        windowNumber: windowNumber,
         windowIndex: currentIndex,
         frame: CodableRect(from: rect),
         relativeFrame: CodableRect(from: relFrame),
         displayIndex: displayIndex,
         displayName: display.name,
-        spaceNumber: spaceNumber,
+        spaceIndex: spaceIndex,
+        spaceNumber: legacySpaceNumber,
         isOnScreen: isOnScreen,
         windowLayer: windowLayer,
         memoryUsage: memoryUsage
       ))
     }
 
-    Log.info("Captured \(windows.count) windows across \(displays.count) displays")
+    let spacesUsed = Set(windows.map { $0.spaceIndex }).filter { $0 > 0 }.sorted()
+    Log.info("Captured \(windows.count) windows across \(displays.count) displays, spaces: \(spacesUsed) (\(windows.filter { $0.isOnScreen }.count) on-screen)")
     return WindowSnapshot(capturedAt: Date(), displays: displays, windows: windows)
   }
 

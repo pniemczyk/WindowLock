@@ -23,6 +23,10 @@ let intervalArg = args.firstIndex(of: "--interval").flatMap {
 
 Log.info("WindowLock starting...")
 
+// MARK: - Space Manager diagnostics
+
+SpaceManager.logDiagnostics()
+
 // MARK: - Accessibility check
 
 let hasAccessibility = PermissionsManager.checkAndPromptAccessibility()

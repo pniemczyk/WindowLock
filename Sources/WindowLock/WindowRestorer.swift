@@ -8,6 +8,8 @@ struct RestoreResult {
   var appsNoWindows: [String] = []
   var windowsMatched: Int = 0
   var windowsMoved: Int = 0
+  var windowsSpaceMoved: Int = 0
+  var windowsSpaceFailed: Int = 0
   var windowsFailed: [(app: String, title: String, error: String)] = []
   var accessibilityDenied: Bool = false
 
@@ -17,6 +19,12 @@ struct RestoreResult {
     lines.append("  Saved windows: \(totalSaved)")
     lines.append("  Matched: \(windowsMatched)")
     lines.append("  Moved: \(windowsMoved)")
+    if windowsSpaceMoved > 0 || windowsSpaceFailed > 0 {
+      lines.append("  Spaces restored: \(windowsSpaceMoved)")
+      if windowsSpaceFailed > 0 {
+        lines.append("  Spaces failed: \(windowsSpaceFailed)")
+      }
+    }
     lines.append("  Failed: \(windowsFailed.count)")
 
     if accessibilityDenied {
@@ -143,7 +151,25 @@ enum WindowRestorer {
       let targetOrigin = absoluteFrame.origin
       let targetSize = absoluteFrame.size
 
-      Log.info("  \(savedWindow.ownerName) [\(savedWindow.windowIndex)] '\(savedWindow.windowTitle)' -> \(targetDisplay.name) @ \(Int(targetOrigin.x)),\(Int(targetOrigin.y)) \(Int(targetSize.width))x\(Int(targetSize.height))")
+      let savedSpaceIndex = savedWindow.spaceIndex > 0 ? savedWindow.spaceIndex : savedWindow.spaceNumber
+
+      Log.info("  \(savedWindow.ownerName) [\(savedWindow.windowIndex)] '\(savedWindow.windowTitle)' -> \(targetDisplay.name) @ \(Int(targetOrigin.x)),\(Int(targetOrigin.y)) \(Int(targetSize.width))x\(Int(targetSize.height)) space:\(savedSpaceIndex)")
+
+      // Step 0: Move window to correct space if needed
+      if savedSpaceIndex > 0, SpaceManager.isAvailable {
+        if let cgWindowID = SpaceManager.windowID(from: axWindow) {
+          let moved = SpaceManager.moveWindow(windowID: cgWindowID, toSpaceIndex: savedSpaceIndex)
+          if moved {
+            result.windowsSpaceMoved += 1
+          } else {
+            Log.warn("  Failed to move window to space \(savedSpaceIndex)")
+            result.windowsSpaceFailed += 1
+          }
+        } else {
+          Log.warn("  Could not get CGWindowID from AXUIElement for space move")
+          result.windowsSpaceFailed += 1
+        }
+      }
 
       // Step 1: Move position first (gets window onto correct monitor)
       let posResult1 = setWindowPosition(axWindow, position: targetOrigin)
@@ -167,71 +193,119 @@ enum WindowRestorer {
     }
   }
 
-  /// Match saved windows to AX windows by title first, then by index.
+  /// Match saved windows to current AX windows with high confidence.
+  ///
+  /// Uses a strict multi-pass approach — only matches when we are confident
+  /// the saved window corresponds to the exact same AX window. Unmatched
+  /// windows are skipped to avoid moving/resizing the wrong window.
+  ///
+  /// Pass 1: CGWindowID — the kernel-level window identifier, stable while
+  ///         the window exists (doesn't survive app restart).
+  /// Pass 2: Exact title + exact size — for windows recreated after restart
+  ///         where the title and dimensions are the same.
+  /// Pass 3: Exact title (unique within app) — only if exactly one saved and
+  ///         one AX window share the same non-empty title.
+  ///
+  /// Deliberately omits fuzzy/index-based matching to prevent wrong-window
+  /// restoration in multi-window apps like Chrome or Mail.
   private static func matchWindows(saved: [WindowInfo], axWindows: [AXUIElement]) -> [(WindowInfo, AXUIElement)] {
     var results: [(WindowInfo, AXUIElement)] = []
     var usedAXIndices = Set<Int>()
+    var matchedSavedIDs = Set<UInt32>() // windowNumber is unique per saved window
 
-    // Get AX window titles and positions
-    let axTitles: [String] = axWindows.map { window in
+    // Pre-compute AX window metadata once
+    struct AXWindowMeta {
+      let title: String
+      let cgWindowID: UInt32
+      let size: CGSize
+    }
+
+    let axMeta: [AXWindowMeta] = axWindows.map { window in
       var titleRef: CFTypeRef?
-      let result = AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef)
-      if result == .success, let title = titleRef as? String {
-        return title
+      let titleResult = AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef)
+      let title = (titleResult == .success) ? (titleRef as? String ?? "") : ""
+
+      let cgID = SpaceManager.windowID(from: window) ?? 0
+
+      var sizeRef: CFTypeRef?
+      var size = CGSize.zero
+      let sizeResult = AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef)
+      if sizeResult == .success, let axValue = sizeRef {
+        AXValueGetValue(axValue as! AXValue, .cgSize, &size)
       }
-      return ""
+
+      return AXWindowMeta(title: title, cgWindowID: cgID, size: size)
     }
 
-    Log.info("  AX window titles: \(axTitles)")
-    Log.info("  Saved titles: \(saved.map { $0.windowTitle })")
+    Log.info("  AX windows (\(axMeta.count)): \(axMeta.map { "id=\($0.cgWindowID) '\($0.title)' \(Int($0.size.width))x\(Int($0.size.height))" })")
+    Log.info("  Saved windows (\(saved.count)): \(saved.map { "id=\($0.windowNumber) '\($0.windowTitle)' \(Int($0.frame.width))x\(Int($0.frame.height))" })")
 
-    // Pass 1: Match by exact title (non-empty titles only)
+    // Pass 1: Match by CGWindowID (strongest identity — same kernel window)
     for savedWindow in saved {
-      guard !savedWindow.windowTitle.isEmpty else { continue }
+      guard savedWindow.windowNumber > 0 else { continue }
 
-      for (axIdx, axTitle) in axTitles.enumerated() where !usedAXIndices.contains(axIdx) {
-        if axTitle == savedWindow.windowTitle {
+      for (axIdx, meta) in axMeta.enumerated() where !usedAXIndices.contains(axIdx) {
+        if meta.cgWindowID > 0 && meta.cgWindowID == savedWindow.windowNumber {
           results.append((savedWindow, axWindows[axIdx]))
           usedAXIndices.insert(axIdx)
-          Log.info("  Matched by exact title: '\(savedWindow.windowTitle)' -> AX[\(axIdx)]")
+          matchedSavedIDs.insert(savedWindow.windowNumber)
+          Log.info("  Matched by windowID: \(savedWindow.windowNumber) '\(savedWindow.windowTitle)' -> AX[\(axIdx)]")
           break
         }
       }
     }
 
-    // Pass 2: Match by partial title (contains)
-    let unmatchedAfterExact = saved.filter { sw in
-      !results.contains(where: { $0.0.windowIndex == sw.windowIndex && $0.0.bundleID == sw.bundleID })
-    }
-
-    for savedWindow in unmatchedAfterExact {
+    // Pass 2: Exact title + matching size (handles app restart where IDs change)
+    //         Size match uses a tolerance to accommodate minor rounding differences.
+    let sizeTolerance: CGFloat = 4.0
+    for savedWindow in saved where !matchedSavedIDs.contains(savedWindow.windowNumber) {
       guard !savedWindow.windowTitle.isEmpty else { continue }
 
-      for (axIdx, axTitle) in axTitles.enumerated() where !usedAXIndices.contains(axIdx) {
-        if !axTitle.isEmpty && (axTitle.contains(savedWindow.windowTitle) || savedWindow.windowTitle.contains(axTitle)) {
+      for (axIdx, meta) in axMeta.enumerated() where !usedAXIndices.contains(axIdx) {
+        if meta.title == savedWindow.windowTitle &&
+           abs(meta.size.width - CGFloat(savedWindow.frame.width)) <= sizeTolerance &&
+           abs(meta.size.height - CGFloat(savedWindow.frame.height)) <= sizeTolerance {
           results.append((savedWindow, axWindows[axIdx]))
           usedAXIndices.insert(axIdx)
-          Log.info("  Matched by partial title: '\(savedWindow.windowTitle)' ~ '\(axTitle)' -> AX[\(axIdx)]")
+          matchedSavedIDs.insert(savedWindow.windowNumber)
+          Log.info("  Matched by title+size: '\(savedWindow.windowTitle)' \(Int(savedWindow.frame.width))x\(Int(savedWindow.frame.height)) -> AX[\(axIdx)]")
           break
         }
       }
     }
 
-    // Pass 3: Match remaining by window index order
-    let stillUnmatched = saved.filter { sw in
-      !results.contains(where: { $0.0.windowIndex == sw.windowIndex && $0.0.bundleID == sw.bundleID })
-    }.sorted(by: { $0.windowIndex < $1.windowIndex })
+    // Pass 3: Exact title only — but ONLY when the title is unique on both sides.
+    //         If multiple saved or AX windows share the same title, skip to avoid ambiguity.
+    let remainingSaved = saved.filter { !matchedSavedIDs.contains($0.windowNumber) && !$0.windowTitle.isEmpty }
+    let remainingAXIndices = (0..<axWindows.count).filter { !usedAXIndices.contains($0) }
 
-    let unusedAXIndices = (0..<axWindows.count).filter { !usedAXIndices.contains($0) }.sorted()
+    // Group remaining saved by title
+    let savedByTitle = Dictionary(grouping: remainingSaved) { $0.windowTitle }
+    // Group remaining AX by title
+    let axByTitle = Dictionary(grouping: remainingAXIndices) { axMeta[$0].title }
 
-    for (i, savedWindow) in stillUnmatched.enumerated() {
-      if i < unusedAXIndices.count {
-        let axIdx = unusedAXIndices[i]
-        results.append((savedWindow, axWindows[axIdx]))
-        usedAXIndices.insert(axIdx)
-        Log.info("  Matched by index: saved[\(savedWindow.windowIndex)] -> AX[\(axIdx)]")
-      } else {
-        Log.warn("  No AX window available for saved[\(savedWindow.windowIndex)] '\(savedWindow.windowTitle)'")
+    for (title, savedGroup) in savedByTitle {
+      guard title != "",
+            savedGroup.count == 1,
+            let axGroup = axByTitle[title],
+            axGroup.count == 1 else { continue }
+
+      let savedWindow = savedGroup[0]
+      let axIdx = axGroup[0]
+      guard !usedAXIndices.contains(axIdx) else { continue }
+
+      results.append((savedWindow, axWindows[axIdx]))
+      usedAXIndices.insert(axIdx)
+      matchedSavedIDs.insert(savedWindow.windowNumber)
+      Log.info("  Matched by unique title: '\(title)' -> AX[\(axIdx)]")
+    }
+
+    // Log unmatched for diagnostics
+    let unmatched = saved.filter { !matchedSavedIDs.contains($0.windowNumber) }
+    if !unmatched.isEmpty {
+      Log.info("  Skipped \(unmatched.count) saved windows (no confident match):")
+      for w in unmatched {
+        Log.info("    - id=\(w.windowNumber) '\(w.windowTitle)' \(Int(w.frame.width))x\(Int(w.frame.height))")
       }
     }
 

@@ -49,6 +49,22 @@ enum DisplayManager {
     return "Display \(index + 1)"
   }
 
+  /// Find a display index by matching a CGS display UUID to a CGDirectDisplayID.
+  /// CGS UUIDs look like "37D8832A-2D66-02CA-B9F7-8F30A301B230" and can be
+  /// converted from CGDirectDisplayID via CGDisplayCreateUUIDFromDisplayID.
+  static func displayIndexByUUID(_ uuid: String, in displays: [DisplayInfo]) -> Int? {
+    for (index, display) in displays.enumerated() {
+      if let cfUUID = CGDisplayCreateUUIDFromDisplayID(display.displayID) {
+        let uuidRef = cfUUID.takeRetainedValue()
+        let displayUUID = CFUUIDCreateString(nil, uuidRef) as String? ?? ""
+        if displayUUID == uuid {
+          return index
+        }
+      }
+    }
+    return nil
+  }
+
   static func displayIndex(for point: CGPoint, in displays: [DisplayInfo]) -> Int {
     for (index, display) in displays.enumerated() {
       if display.bounds.cgRect.contains(point) {

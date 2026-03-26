@@ -56,9 +56,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     displayItem.tag = infoTag + 1
     menu.addItem(displayItem)
 
+    let spacesItem = NSMenuItem(title: "Spaces: --", action: nil, keyEquivalent: "")
+    spacesItem.isEnabled = false
+    spacesItem.tag = infoTag + 2
+    menu.addItem(spacesItem)
+
     let captureTimeItem = NSMenuItem(title: "Last capture: --", action: nil, keyEquivalent: "")
     captureTimeItem.isEnabled = false
-    captureTimeItem.tag = infoTag + 2
+    captureTimeItem.tag = infoTag + 3
     menu.addItem(captureTimeItem)
 
     updateInfoItems(menu)
@@ -179,6 +184,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     menu.addItem(NSMenuItem.separator())
 
+    // --- About ---
+    let aboutItem = NSMenuItem(title: "About WindowLock", action: #selector(handleAbout), keyEquivalent: "")
+    aboutItem.target = self
+    menu.addItem(aboutItem)
+
+    menu.addItem(NSMenuItem.separator())
+
     // --- Quit ---
     let quitItem = NSMenuItem(title: "Quit WindowLock", action: #selector(handleQuit), keyEquivalent: "q")
     quitItem.target = self
@@ -255,12 +267,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     formatter.dateFormat = "HH:mm:ss"
 
     if let item = menu.item(withTag: infoTag) {
-      item.title = "Windows: \(snapshot.windows.count)"
+      let onScreen = snapshot.windows.filter { $0.isOnScreen }.count
+      item.title = "Windows: \(snapshot.windows.count) (\(onScreen) visible)"
     }
     if let item = menu.item(withTag: infoTag + 1) {
       item.title = "Displays: \(snapshot.displays.count)"
     }
     if let item = menu.item(withTag: infoTag + 2) {
+      let spaceCount = SpaceManager.totalSpaceCount()
+      let spacesUsed = Set(snapshot.windows.map { $0.spaceIndex }).filter { $0 > 0 }.count
+      item.title = "Spaces: \(spaceCount) total, \(spacesUsed) with windows"
+    }
+    if let item = menu.item(withTag: infoTag + 3) {
       item.title = "Last capture: \(formatter.string(from: snapshot.capturedAt))"
     }
   }
@@ -574,6 +592,81 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     PermissionsManager.openAccessibilitySettings()
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
       PermissionsManager.openScreenRecordingSettings()
+    }
+  }
+
+  @objc private func handleAbout() {
+    NSApp.activate(ignoringOtherApps: true)
+
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
+    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? version
+    let repoURL = "https://github.com/way2doit/window-lock"
+
+    let alert = NSAlert()
+    alert.messageText = "WindowLock"
+    alert.alertStyle = .informational
+
+    if let appIcon = NSImage(named: NSImage.applicationIconName) {
+      alert.icon = appIcon
+    }
+
+    // Build the About content view
+    let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 145))
+
+    let versionLabel = NSTextField(labelWithString: "Version \(version) (build \(build))")
+    versionLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+    versionLabel.frame = NSRect(x: 0, y: 120, width: 300, height: 20)
+    container.addSubview(versionLabel)
+
+    let taglineLabel = NSTextField(labelWithString: "Your windows. Your monitors. Your layout. Every single time.")
+    taglineLabel.font = NSFont.systemFont(ofSize: 11)
+    taglineLabel.textColor = .secondaryLabelColor
+    taglineLabel.frame = NSRect(x: 0, y: 98, width: 300, height: 18)
+    container.addSubview(taglineLabel)
+
+    let separator = NSBox(frame: NSRect(x: 0, y: 88, width: 300, height: 1))
+    separator.boxType = .separator
+    container.addSubview(separator)
+
+    let authorLabel = NSTextField(labelWithString: "Author: Paweł Niemczyk")
+    authorLabel.font = NSFont.systemFont(ofSize: 12)
+    authorLabel.frame = NSRect(x: 0, y: 64, width: 300, height: 18)
+    container.addSubview(authorLabel)
+
+    let companyLabel = NSTextField(labelWithString: "way2do.it")
+    companyLabel.font = NSFont.systemFont(ofSize: 12)
+    companyLabel.textColor = .secondaryLabelColor
+    companyLabel.frame = NSRect(x: 0, y: 46, width: 300, height: 18)
+    container.addSubview(companyLabel)
+
+    let repoBtn = NSButton(frame: NSRect(x: 0, y: 10, width: 300, height: 20))
+    repoBtn.isBordered = false
+    repoBtn.setButtonType(.momentaryPushIn)
+    repoBtn.alignment = .left
+    repoBtn.target = self
+    repoBtn.action = #selector(handleOpenRepo)
+    let linkAttrs: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 12),
+      .foregroundColor: NSColor.controlAccentColor,
+      .underlineStyle: NSUnderlineStyle.single.rawValue,
+    ]
+    repoBtn.attributedTitle = NSAttributedString(string: repoURL, attributes: linkAttrs)
+    container.addSubview(repoBtn)
+
+    let copyrightLabel = NSTextField(labelWithString: "© 2026 way2do.it — MIT License")
+    copyrightLabel.font = NSFont.systemFont(ofSize: 10)
+    copyrightLabel.textColor = .tertiaryLabelColor
+    copyrightLabel.frame = NSRect(x: 0, y: -8, width: 300, height: 16)
+    container.addSubview(copyrightLabel)
+
+    alert.accessoryView = container
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
+  }
+
+  @objc private func handleOpenRepo() {
+    if let url = URL(string: "https://github.com/pniemczyk/WindowLock") {
+      NSWorkspace.shared.open(url)
     }
   }
 

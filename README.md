@@ -21,11 +21,12 @@ All windows get piled onto the primary display, losing their carefully arranged 
 
 ## How It Works
 
-1. **Captures** window positions every 30 seconds and immediately before sleep
+1. **Captures** window positions every 30 seconds and immediately before sleep — across all Spaces and monitors, not just the active one
 2. **Stores** state as JSON in `~/Library/Application Support/WindowLock/`
-3. **Restores** windows to their saved positions after wake, display changes, or app launches
+3. **Restores** windows to their saved positions, sizes, monitors, and Spaces after wake, display changes, or app launches
 4. **Matches** displays by resolution and arrangement (not display IDs, which macOS reassigns after sleep)
-5. **Runs** silently in the background with a menu bar icon (no Dock icon)
+5. **Matches** windows by CGWindowID first, then exact title — skips anything it can't confidently identify to avoid moving the wrong window
+6. **Runs** silently in the background with a menu bar icon (no Dock icon)
 
 ## Requirements
 
@@ -37,11 +38,11 @@ All windows get piled onto the primary display, losing their carefully arranged 
 
 ### Using the Installer (.pkg)
 
-Download or build the `WindowLock-1.0.0.pkg` installer and double-click to install.
+Download or build the `WindowLock-1.1.0.pkg` installer and double-click to install.
 
 Since this app is ad-hoc signed (no Apple Developer ID), macOS may block it:
 - Right-click the `.pkg` > **Open**, or
-- Run: `xattr -cr WindowLock-1.0.0.pkg`
+- Run: `xattr -cr WindowLock-1.1.0.pkg`
 
 The installer places `WindowLock.app` in `/Applications` and configures auto-start on login.
 
@@ -50,7 +51,7 @@ To build the installer from source:
 ```bash
 chmod +x Scripts/build-installer.sh
 ./Scripts/build-installer.sh
-# Output: .build/WindowLock-1.0.0.pkg
+# Output: .build/WindowLock-1.1.0.pkg
 ```
 
 ### From the command line
@@ -183,25 +184,35 @@ This is useful for troubleshooting when windows don't move to their expected pos
 
 ### Window Log
 
-The Window Log provides a detailed table view of every tracked window, similar to Activity Monitor. Open it via **Show Window Log...** (Cmd+L).
+The Window Log provides a detailed, interactive view of every tracked window across all Spaces and monitors, similar to Activity Monitor. Open it via **Show Window Log...** (Cmd+L).
 
 | Column | Description |
 |---|---|
-| App | Application name |
+| App | Application name (clickable — activates and shows the window) |
 | Window | Window title |
 | PID | Process ID |
+| Actions | Show, Reveal in Finder, Open Terminal, Force Quit buttons |
 | Monitor | Display name (e.g., "LG ULTRAGEAR+", "Built-in Retina Display") |
 | Space | Virtual desktop / Space number |
+| Status | Visible or hidden (on another Space) |
 | Position | Absolute screen coordinates (x, y) |
 | Size | Window dimensions (width x height) |
 | Memory | Window buffer memory usage |
 | Bundle ID | Application bundle identifier |
 
-Features:
+**Interactive features:**
+- **Click app name** to activate and show that window (switches Space if needed)
+- **Action buttons** with SF Symbol icons and tooltips:
+  - 👁 **Show** — bring window to the current Space and focus it
+  - 📁 **Reveal in Finder** — open the app's bundle location
+  - 💻 **Open Terminal** — open Terminal.app in the app's directory
+  - ✕ **Force Quit** — terminate the app (requires confirmation)
+- **Right-click context menu** — all actions plus Copy (PID, Bundle ID, Path)
+- **Tree grouping** — apps with multiple windows (e.g., Chrome, Mail) are grouped under expandable parent rows; click the disclosure triangle to see individual windows
+- **Persistent layout** — window size, position, column widths, column order, and sort state are remembered across sessions
 - Click any column header to sort
-- Auto-refresh every 5 seconds (toggleable)
-- Manual refresh button
-- Status bar showing total window count, display count, and memory
+- Auto-refresh every 5 seconds (toggleable; expanded groups stay expanded)
+- Status bar showing total window count, app count, spaces, and memory
 - Display info bar showing connected monitors with resolutions
 
 ### Permissions
@@ -270,15 +281,28 @@ After sleep/wake, macOS assigns new display IDs. WindowLock handles this by:
 
 This means your windows are restored to the correct monitor even when display IDs change.
 
+## How Space Tracking Works
+
+WindowLock uses macOS private CGS APIs (the same ones used by yabai, Amethyst, and other window managers) to track and restore windows across virtual desktops:
+
+1. **Enumerates all Spaces** across all displays via `CGSCopyManagedDisplaySpaces`
+2. **Queries each window's Space** via `CGSCopySpacesForWindows` with the "all spaces" bitmask
+3. **Moves windows between Spaces** via `CGSMoveWindowsToManagedSpace` during restore
+4. **Maps display UUIDs** from CGS to `CGDirectDisplayID` for accurate cross-display tracking
+
+This means WindowLock captures and restores the complete state — even windows on Spaces you're not currently viewing.
+
 ## How Window Matching Works
 
-Windows are matched between saved state and current state using a 3-pass approach:
+Windows are matched between saved state and current state using a strict 3-pass approach. The goal is **high confidence** — if a window can't be identified with certainty, it is skipped rather than guessed (preventing wrong-window restoration in multi-window apps like Chrome or Mail).
 
-1. **Exact title match** - pairs windows with identical titles
-2. **Partial title match** - handles windows where titles changed slightly (e.g., tab changes in browsers)
-3. **Index-based fallback** - matches remaining windows by their order within each app
+1. **CGWindowID match** — the kernel-level window identifier, unique per window and stable as long as the window exists. This handles sleep/wake, Space changes, and display reconnections perfectly.
+2. **Exact title + exact size** — for windows recreated after an app restart where the CGWindowID changed but the title and dimensions are the same.
+3. **Unique exact title** — only matches when exactly one saved window and one current window share the same non-empty title within that app. Ambiguous titles (e.g., multiple "(untitled)" windows) are skipped.
 
-When restoring, each window goes through a **position-size-position** sequence: first move to the correct monitor, then resize, then fine-tune position (some apps clamp position on the first move).
+When restoring, each matched window goes through:
+- **Space restoration** — move to the correct virtual desktop first
+- **Position-size-position** sequence — move to the correct monitor, resize, then fine-tune position (some apps clamp position on the first move)
 
 ## Development
 
@@ -336,14 +360,15 @@ window_lock/
   Sources/WindowLock/
     main.swift                   # Entry point, CLI args, run loop, daemon setup
     WindowState.swift            # Data models (Codable structs)
-    WindowTracker.swift          # Captures windows via CGWindowList + AX API
-    WindowRestorer.swift         # Restores positions via AXUIElement Accessibility API
-    DisplayManager.swift         # Display enumeration, naming, and mapping
+    WindowTracker.swift          # Captures windows via CGWindowList + AX API (all Spaces)
+    WindowRestorer.swift         # Restores positions, sizes, and Spaces via AX + CGS APIs
+    DisplayManager.swift         # Display enumeration, naming, UUID mapping
+    SpaceManager.swift           # macOS Spaces (virtual desktops) via private CGS APIs
     StateStore.swift             # JSON persistence for auto-saved state
     ProfileStore.swift           # Named layout save/load/delete
     SleepWakeObserver.swift      # Sleep/wake/display-change notifications
     StatusBarController.swift    # Menu bar icon, dropdown menu, uninstall
-    LogWindowController.swift    # Activity Monitor-style window log table
+    LogWindowController.swift    # Interactive window log with tree grouping (NSOutlineView)
     AccessibilityHelper.swift    # Permission checking and prompting
     Logger.swift                 # stderr logging with timestamps
   Scripts/
@@ -379,9 +404,11 @@ window_lock/
 ## Limitations
 
 - Some apps resist window repositioning (e.g., Finder desktop windows)
-- Window titles require Accessibility permission; without it, matching falls back to window index order
-- After a full restart, windows are restored as each app launches (with a short delay)
+- Window titles require Accessibility permission; without it, matching relies on CGWindowID only
+- After a full restart, CGWindowIDs change — matching falls back to exact title + size, and windows without a confident match are skipped
 - Cannot restore windows for apps that aren't running
+- Space management uses private macOS CGS APIs — these are undocumented and could break in future macOS versions (though they've been stable for years and are used by yabai, Amethyst, etc.)
+- Fullscreen spaces are tracked but window movement into/out of fullscreen is not supported
 
 ## License
 
