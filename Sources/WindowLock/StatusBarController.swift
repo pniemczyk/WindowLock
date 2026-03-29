@@ -157,11 +157,32 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     let configItem = NSMenuItem(title: "Configuration", action: nil, keyEquivalent: "")
     let configMenu = NSMenu()
 
+    // Launch at Login
+    let launchAtLoginItem = NSMenuItem(
+      title: "Launch at Login",
+      action: #selector(handleToggleLaunchAtLogin),
+      keyEquivalent: ""
+    )
+    launchAtLoginItem.target = self
+    launchAtLoginItem.state = LaunchAtLoginManager.isEnabled ? .on : .off
+    configMenu.addItem(launchAtLoginItem)
+
+    configMenu.addItem(NSMenuItem.separator())
+
     // Debug mode
     let debugItem = NSMenuItem(title: "Debug Mode", action: #selector(handleToggleDebug(_:)), keyEquivalent: "d")
     debugItem.target = self
     debugItem.state = Log.debugMode ? .on : .off
     configMenu.addItem(debugItem)
+
+    configMenu.addItem(NSMenuItem.separator())
+
+    // Logs submenu
+    let logsItem = NSMenuItem(title: "Logs", action: nil, keyEquivalent: "")
+    let logsMenu = NSMenu()
+    buildLogsSubmenu(logsMenu)
+    logsItem.submenu = logsMenu
+    configMenu.addItem(logsItem)
 
     configMenu.addItem(NSMenuItem.separator())
 
@@ -195,6 +216,33 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     let quitItem = NSMenuItem(title: "Quit WindowLock", action: #selector(handleQuit), keyEquivalent: "q")
     quitItem.target = self
     menu.addItem(quitItem)
+  }
+
+  private func buildLogsSubmenu(_ menu: NSMenu) {
+    let size = Log.logFileSize()
+    let sizeStr: String
+    if size < 1024 {
+      sizeStr = "\(size) B"
+    } else if size < 1024 * 1024 {
+      sizeStr = String(format: "%.1f KB", Double(size) / 1024)
+    } else {
+      sizeStr = String(format: "%.2f MB", Double(size) / (1024 * 1024))
+    }
+
+    let sizeItem = NSMenuItem(title: "Log file size: \(sizeStr)", action: nil, keyEquivalent: "")
+    sizeItem.isEnabled = false
+    menu.addItem(sizeItem)
+
+    menu.addItem(NSMenuItem.separator())
+
+    let clearItem = NSMenuItem(title: "Clear Log File...", action: #selector(handleClearLogs), keyEquivalent: "")
+    clearItem.target = self
+    clearItem.isEnabled = size > 0
+    menu.addItem(clearItem)
+
+    let openItem = NSMenuItem(title: "Open Logs Folder", action: #selector(handleOpenLogsFolder), keyEquivalent: "")
+    openItem.target = self
+    menu.addItem(openItem)
   }
 
   private func buildPermissionsSubmenu(_ menu: NSMenu) {
@@ -383,6 +431,30 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
   @objc private func handleCapture() {
     onCapture()
+  }
+
+  @objc private func handleToggleLaunchAtLogin() {
+    if LaunchAtLoginManager.isEnabled {
+      LaunchAtLoginManager.disable()
+    } else {
+      LaunchAtLoginManager.enable()
+    }
+  }
+
+  @objc private func handleClearLogs() {
+    NSApp.activate(ignoringOtherApps: true)
+    let alert = NSAlert()
+    alert.messageText = "Clear Log File?"
+    alert.informativeText = "This will permanently delete all log entries on disk. Recent in-memory entries will also be cleared."
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "Clear")
+    alert.addButton(withTitle: "Cancel")
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    Log.clearLogFile()
+  }
+
+  @objc private func handleOpenLogsFolder() {
+    NSWorkspace.shared.open(Log.logDirURL)
   }
 
   @objc private func handleToggleDebug(_ sender: NSMenuItem) {

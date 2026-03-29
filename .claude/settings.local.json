@@ -24,7 +24,8 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); spaces=set\\(\\); [spaces.add\\(w[''''spaceIndex'''']\\) for w in d[''''windows'''']]; print\\(f\"\"Windows: {len\\(d[''''windows'''']\\)}, Displays: {len\\(d[''''displays'''']\\)}, Spaces: {sorted\\(spaces\\)}\"\"\\); visible=[w for w in d[''''windows''''] if w[''''isOnScreen'''']]; print\\(f\"\"Visible: {len\\(visible\\)}, Hidden: {len\\(d[''''windows'''']\\)-len\\(visible\\)}\"\"\\)\")",
       "Bash(pkill -f '.build/debug/WindowLock')",
       "Bash(grep -E \"\\\\.swift$\")",
-      "Bash(wc -l /Users/kido/git/companies/way2do.it/production/window_lock/Sources/WindowLock/*.swift)"
+      "Bash(wc -l /Users/kido/git/companies/way2do.it/production/window_lock/Sources/WindowLock/*.swift)",
+      "WebSearch"
     ]
   }
 }

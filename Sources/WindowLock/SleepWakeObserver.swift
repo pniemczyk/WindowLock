@@ -6,6 +6,10 @@ final class SleepWakeObserver {
   private let onWake: () -> Void
   private let onAppLaunch: (String) -> Void
 
+  /// Tracks whether the system is currently sleeping to suppress spurious
+  /// display-change events that fire as monitors power off during sleep.
+  private var isSleeping = false
+
   init(
     onSleep: @escaping () -> Void,
     onWake: @escaping () -> Void,
@@ -52,11 +56,13 @@ final class SleepWakeObserver {
   }
 
   @objc private func handleSleep() {
+    isSleeping = true
     Log.info("System going to sleep - capturing state")
     onSleep()
   }
 
   @objc private func handleWake() {
+    isSleeping = false
     Log.info("System woke up - scheduling restoration")
     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
       self?.onWake()
@@ -74,9 +80,14 @@ final class SleepWakeObserver {
   }
 
   @objc private func handleDisplayChange() {
+    guard !isSleeping else {
+      Log.info("Display configuration changed during sleep - ignoring")
+      return
+    }
     Log.info("Display configuration changed - scheduling restoration")
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-      self?.onWake()
+      guard let self, !self.isSleeping else { return }
+      self.onWake()
     }
   }
 

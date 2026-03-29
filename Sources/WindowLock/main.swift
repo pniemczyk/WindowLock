@@ -1,6 +1,43 @@
 import Foundation
 import AppKit
 
+// MARK: - Crash and fatal error logging
+
+// Log uncaught Objective-C exceptions to file before crashing
+NSSetUncaughtExceptionHandler { exception in
+  Log.error("UNCAUGHT EXCEPTION: \(exception.name.rawValue) - \(exception.reason ?? "no reason")")
+  Log.error("Stack trace: \(exception.callStackSymbols.joined(separator: "\n"))")
+}
+
+// Log fatal signals (SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE) to file.
+// Signal handlers must only call async-signal-safe functions, so we write
+// a plain marker line with write(2) and let the default handler crash afterward.
+func installCrashSignalHandlers() {
+  let signals = [SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE]
+  for sig in signals {
+    signal(sig) { signum in
+      let msg = "FATAL SIGNAL \(signum) - WindowLock crashed\n"
+      // Write directly to log file using low-level I/O (async-signal-safe)
+      if let path = Log.logFileURL.path.cString(using: .utf8) {
+        let fd = open(path, O_WRONLY | O_APPEND)
+        if fd >= 0 {
+          _ = msg.withCString { write(fd, $0, strlen($0)) }
+          close(fd)
+        }
+      }
+      // Re-raise with default handler to generate a crash report
+      signal(signum, SIG_DFL)
+      raise(signum)
+    }
+  }
+}
+installCrashSignalHandlers()
+
+// Log normal process exit
+atexit {
+  Log.info("WindowLock process exiting")
+}
+
 // MARK: - CLI argument parsing
 
 let args = CommandLine.arguments
@@ -113,6 +150,23 @@ if restoreOnly {
 Log.info("Running in daemon mode (capture interval: \(intervalArg)s)")
 
 let app = NSApplication.shared
+
+// App delegate — logs termination events so we always know why the app exited
+final class AppDelegate: NSObject, NSApplicationDelegate {
+  func applicationWillTerminate(_ notification: Notification) {
+    Log.info("applicationWillTerminate called - saving final state")
+    let snapshot = WindowTracker.captureCurrentState()
+    if !snapshot.windows.isEmpty { StateStore.save(snapshot) }
+  }
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    Log.info("applicationShouldTerminate called")
+    return .terminateNow
+  }
+}
+
+let delegate = AppDelegate()
+app.delegate = delegate
 
 // Hide from Dock — menu bar icon only
 app.setActivationPolicy(.accessory)

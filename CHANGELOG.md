@@ -2,6 +2,27 @@
 
 All notable changes to WindowLock will be documented in this file.
 
+## [1.2.1] - 2026-03-29
+
+### Fixed
+
+- **App exits after sleep and never restarts** — `LaunchAgent` `KeepAlive` was set to `SuccessfulExit: false`, meaning it only restarted the app on a non-zero exit code. macOS sends `SIGTERM` to background apps during sleep; the handler called `exit(0)` (clean exit), so the LaunchAgent never restarted it. Changed to `KeepAlive: true` so the app always restarts regardless of exit code.
+- **Log entries lost on abrupt termination** — log file writes were buffered in memory. If the process was killed mid-write (e.g. `SIGKILL` after sleep), the last log lines were never flushed to disk. Added `synchronizeFile()` after every write to force an immediate flush.
+- **Spurious display-change captures during sleep** — `NSApplication.didChangeScreenParametersNotification` fires as monitors power off when the system goes to sleep, triggering a `captureNow()` and a scheduled `restoreNow()` right as macOS was terminating the process. Added `isSleeping` state tracking to `SleepWakeObserver` so display-change events are ignored between `willSleep` and `didWake`.
+- **No crash or fatal error logging** — Swift crashes, uncaught Objective-C exceptions, and fatal signals (`SIGSEGV`, `SIGABRT`, `SIGBUS`, `SIGILL`, `SIGFPE`) left no trace in the log file. Added `NSSetUncaughtExceptionHandler`, async-signal-safe crash signal handlers that write directly to the log file, an `atexit` handler, and an `NSApplicationDelegate` that logs `applicationWillTerminate` and saves a final state snapshot.
+
+## [1.2.0] - 2026-03-27
+
+### Added
+
+- **Launch at Login** — new toggle in Configuration submenu. Enabling it installs a LaunchAgent plist pointing to the running binary and loads it immediately; disabling removes it. The checkmark reflects live plist state on every menu open.
+- **Persistent log file** — all log output is now written to `~/Library/Logs/WindowLock/windowlock.log` in addition to stderr. The file is created on first launch and appended to across restarts.
+- **Logs submenu** in Configuration:
+  - Shows current log file size (B / KB / MB)
+  - **Clear Log File...** — truncates the on-disk file and clears in-memory entries (requires confirmation; disabled when file is empty)
+  - **Open Logs Folder** — opens `~/Library/Logs/WindowLock/` in Finder
+- **About WindowLock** — new menu item above Quit showing version, tagline, author (Paweł Niemczyk), company (way2do.it), and a clickable link to the GitHub repository.
+
 ## [1.1.0] - 2026-03-26
 
 ### Added

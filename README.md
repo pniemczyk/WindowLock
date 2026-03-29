@@ -38,11 +38,11 @@ All windows get piled onto the primary display, losing their carefully arranged 
 
 ### Using the Installer (.pkg)
 
-Download or build the `WindowLock-1.1.0.pkg` installer and double-click to install.
+Download or build the `WindowLock-1.2.1.pkg` installer and double-click to install.
 
 Since this app is ad-hoc signed (no Apple Developer ID), macOS may block it:
 - Right-click the `.pkg` > **Open**, or
-- Run: `xattr -cr WindowLock-1.1.0.pkg`
+- Run: `xattr -cr WindowLock-1.2.1.pkg`
 
 The installer places `WindowLock.app` in `/Applications` and configures auto-start on login.
 
@@ -51,7 +51,7 @@ To build the installer from source:
 ```bash
 chmod +x Scripts/build-installer.sh
 ./Scripts/build-installer.sh
-# Output: .build/WindowLock-1.1.0.pkg
+# Output: .build/WindowLock-1.2.1.pkg
 ```
 
 ### From the command line
@@ -116,7 +116,7 @@ sudo rm /usr/local/bin/windowlock
 rm -rf ~/Library/Application\ Support/WindowLock
 
 # 5. (Optional) Remove logs
-rm -f /tmp/windowlock-stdout.log /tmp/windowlock-stderr.log
+rm -rf ~/Library/Logs/WindowLock
 
 # 6. (Optional) Remove Accessibility entry
 #    System Settings > Privacy & Security > Accessibility
@@ -132,8 +132,9 @@ WindowLock runs automatically after installation with a menu bar icon.
 A window icon appears in the macOS menu bar:
 
 ```
-Windows: 15
+Windows: 15 (7 visible)
 Displays: 3
+Spaces: 19 total, 9 with windows
 Last capture: 14:32:05
 ─────────────────────────
 Show Window Log...    ⌘L
@@ -149,9 +150,21 @@ Save Layout As...     ⌘S
 Manage Layouts          ▸
 ─────────────────────────
 Configuration           ▸
+  ✓ Launch at Login
+  ─────────────────────
   Debug Mode          ⌘D
+  ─────────────────────
+  Logs                  ▸
+    Log file size: 42 KB
+    ─────────────────────
+    Clear Log File...
+    Open Logs Folder
+  ─────────────────────
   Permissions           ▸
+  ─────────────────────
   Uninstall WindowLock...
+─────────────────────────
+About WindowLock
 ─────────────────────────
 Quit WindowLock       ⌘Q
 ```
@@ -266,10 +279,21 @@ windowlock --delete-layout "Work Setup"
 
 ### Logs
 
+All log output is written to `~/Library/Logs/WindowLock/windowlock.log`. You can view it live or manage it via the menu:
+
 ```bash
 # View live logs
-tail -f /tmp/windowlock-stderr.log
+tail -f ~/Library/Logs/WindowLock/windowlock.log
 ```
+
+Or use the **Logs** submenu under **Configuration** to:
+- See the current log file size
+- **Clear Log File** — truncate the file (with confirmation)
+- **Open Logs Folder** — open `~/Library/Logs/WindowLock/` in Finder
+
+### Launch at Login
+
+Toggle **Launch at Login** under **Configuration** to have WindowLock start automatically when you log in. This installs or removes a LaunchAgent at `~/Library/LaunchAgents/com.way2do.windowlock.plist` pointing to the current binary. No restart required — the change takes effect immediately.
 
 ## How Display Matching Works
 
@@ -369,8 +393,9 @@ window_lock/
     SleepWakeObserver.swift      # Sleep/wake/display-change notifications
     StatusBarController.swift    # Menu bar icon, dropdown menu, uninstall
     LogWindowController.swift    # Interactive window log with tree grouping (NSOutlineView)
+    LaunchAtLoginManager.swift   # LaunchAgent install/remove for Login Items
     AccessibilityHelper.swift    # Permission checking and prompting
-    Logger.swift                 # stderr logging with timestamps
+    Logger.swift                 # Logging to stderr and ~/Library/Logs/WindowLock/
   Scripts/
     build-installer.sh           # Build release + create .pkg installer
     dev-build.sh                 # Build debug + assemble .app bundle
@@ -396,10 +421,9 @@ window_lock/
 |---|---|
 | `~/Library/Application Support/WindowLock/window-state.json` | Auto-saved window state (updated every 30s) |
 | `~/Library/Application Support/WindowLock/profiles/<name>.json` | Named saved layouts |
+| `~/Library/Logs/WindowLock/windowlock.log` | Application log file |
 | `~/Library/LaunchAgents/com.way2do.windowlock.plist` | LaunchAgent (auto-start on login) |
-| `/usr/local/bin/windowlock` | Installed binary |
-| `/tmp/windowlock-stderr.log` | Daemon logs |
-| `/tmp/windowlock-stdout.log` | Daemon stdout |
+| `/Applications/WindowLock.app` | Installed app bundle |
 
 ## Limitations
 
